@@ -12,8 +12,12 @@ export class GameCore {
   entities: Entity[] = [];
   particles: Entity[] = [];
   
-  camera: { x: number, y: number } = { x: 0, y: 0 };
+  camera: { x: number, y: number, scale: number } = { x: 1500, y: 1500, scale: 1 };
   worldSize = 3000;
+  
+  // 膨胀机制参数
+  expansionCount = 0;
+  nextExpandSize = 80;
   
   onGameOver: (score: number) => void;
   onScoreUpdate: (score: number) => void;
@@ -58,6 +62,11 @@ export class GameCore {
   }
 
   initWorld() {
+    this.worldSize = 3000;
+    this.expansionCount = 0;
+    this.nextExpandSize = 80;
+    this.camera = { x: this.worldSize / 2, y: this.worldSize / 2, scale: 1 };
+    
     this.entities = [];
     this.particles = [];
     this.player = new Entity(this.worldSize / 2, this.worldSize / 2, 40, 'player', '#3b82f6');
@@ -71,7 +80,6 @@ export class GameCore {
       this.spawnEnemy();
     }
     
-    // Spawn some initial food
     for (let i = 0; i < 100; i++) {
       this.spawnFood();
     }
@@ -80,7 +88,9 @@ export class GameCore {
   getSafeSpawnPos(): { x: number, y: number } {
     let x = 0, y = 0, dist = 0;
     let attempts = 0;
-    const safeDistance = 600 + (this.player ? this.player.size * 2 : 0); // Scale safety radius
+    // 镜头变大时，可视范围更广，因此安全距离必须跟缩放比例挂钩，防止刷脸
+    const screenDiag = Math.sqrt(this.width * this.width + this.height * this.height);
+    const safeDistance = (screenDiag / this.camera.scale) * 0.6 + (this.player ? this.player.size : 0);
     
     do {
       x = Math.random() * this.worldSize;
@@ -91,11 +101,11 @@ export class GameCore {
         const dy = y - (this.player.y + this.player.size / 2);
         dist = Math.sqrt(dx * dx + dy * dy);
       } else {
-        dist = safeDistance + 1; // Force pass if player isn't fully ready
+        dist = safeDistance + 1;
       }
       
       attempts++;
-    } while (dist < safeDistance && attempts < 20); // Stop after 20 tries to prevent hanging
+    } while (dist < safeDistance && attempts < 20); 
     
     return { x, y };
   }
@@ -103,8 +113,17 @@ export class GameCore {
   spawnEnemy() {
     const { x, y } = this.getSafeSpawnPos();
     
-    // Vary size based on player's current size to keep it interesting
-    const scaleFactor = (Math.random() * 1.5) + 0.5; 
+    // 难度：随着膨胀次数增加，逐渐提升大体积方块生成的概率
+    const difficulty = Math.min(1.0, this.expansionCount / 10); 
+    
+    // 控制随机分布曲线。早期重度偏向生成小方块(power=2)，后期趋于平均甚至更偏向大方块(power=0.5)
+    const power = Math.max(0.5, 2.0 - (difficulty * 1.5)); 
+    const r = Math.pow(Math.random(), power);
+
+    const minScale = 0.4 + (difficulty * 0.4); // 下限：0.4x -> 0.8x
+    const maxScale = 1.3 + (difficulty * 1.5); // 上限：1.3x -> 2.8x
+
+    const scaleFactor = minScale + (r * (maxScale - minScale));
     const size = Math.max(20, this.player.targetSize * scaleFactor);
     
     this.entities.push(new Entity(x, y, size, 'enemy', '#eab308'));
@@ -178,10 +197,43 @@ export class GameCore {
     this.canvas.height = height;
   }
 
+  expandWorld() {
+    const factor = 1.5;
+    this.worldSize *= factor;
+    this.nextExpandSize *= factor;
+    this.expansionCount++;
+
+    // 缩放函数：按比例拉开所有实体的距离，同时同步放大速度表现
+    const scaleObj = (obj: Entity) => {
+      obj.x *= factor;
+      obj.y *= factor;
+      obj.vx *= factor;
+      obj.vy *= factor;
+      obj.targetVx *= factor;
+      obj.targetVy *= factor;
+    };
+
+    this.entities.forEach(scaleObj);
+    this.particles.forEach(scaleObj);
+    scaleObj(this.player);
+
+    this.camera.x *= factor;
+    this.camera.y *= factor;
+
+    // 因为场地变大了，立刻额外刷新一些方块填补空缺
+    const spawnCount = Math.floor(15 * factor);
+    for(let i=0; i<spawnCount; i++) this.spawnEnemy();
+    for(let i=0; i<spawnCount * 2; i++) this.spawnFood();
+  }
+
   update() {
     if (this.player.isDead) return;
 
-    // Update Survival Time
+    // 检查世界是否需要按比例膨胀拉开距离
+    if (this.player.targetSize >= this.nextExpandSize) {
+       this.expandWorld();
+    }
+
     const now = Date.now();
     const elapsedSeconds = Math.floor((now - this.startTime) / 1000);
     const m = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
@@ -193,9 +245,11 @@ export class GameCore {
       this.onTimeUpdate(currentTimerStr);
     }
 
-    // Player Movement
-    const speed = 400 / this.player.size; // Slower when bigger
-    const maxSpeed = Math.min(6, Math.max(2, speed));
+    // 世界拉大后基础速度基数也要变大，保证移动手感
+    const speedMult = Math.pow(1.5, this.expansionCount);
+    const speed = (400 / this.player.size) * speedMult; 
+    const maxSpeed = Math.max(2 * speedMult, speed);
+    const clampedMax = Math.min(6 * speedMult, maxSpeed);
     
     let inputX = 0;
     let inputY = 0;
@@ -216,22 +270,19 @@ export class GameCore {
       inputY = this.joystick.dirY;
     }
 
-    this.player.vx += inputX * 1;
-    this.player.vy += inputY * 1;
+    this.player.vx += inputX * 1 * speedMult;
+    this.player.vy += inputY * 1 * speedMult;
 
-    // Clamp speed
     const velMag = Math.sqrt(this.player.vx ** 2 + this.player.vy ** 2);
-    if (velMag > maxSpeed) {
-      this.player.vx = (this.player.vx / velMag) * maxSpeed;
-      this.player.vy = (this.player.vy / velMag) * maxSpeed;
+    if (velMag > clampedMax) {
+      this.player.vx = (this.player.vx / velMag) * clampedMax;
+      this.player.vy = (this.player.vy / velMag) * clampedMax;
     }
 
-    // Update all entities
     this.player.update();
     this.entities.forEach(e => this.updateAI(e));
     this.particles.forEach(p => p.update());
 
-    // Keep player in bounds
     this.player.x = Math.max(0, Math.min(this.worldSize - this.player.size, this.player.x));
     this.player.y = Math.max(0, Math.min(this.worldSize - this.player.size, this.player.y));
 
@@ -242,17 +293,14 @@ export class GameCore {
       const a = allCollidables[i];
       if (a.isDead) continue;
 
-      // Collide with other blocks
       for (let j = i + 1; j < allCollidables.length; j++) {
         const b = allCollidables[j];
         if (b.isDead) continue;
         this.checkBlockCollision(a, b);
       }
 
-      // Collide with particles (food)
       for (let p of this.particles) {
         if (p.isDead) continue;
-        // Don't let particles be eaten in their first 15 frames so they have time to fly out
         if (p.age < 15) continue; 
         
         if (this.isOverlapping(a, p)) {
@@ -263,48 +311,62 @@ export class GameCore {
       }
     }
 
-    // Cleanup dead entities
     this.entities = this.entities.filter(e => !e.isDead);
     this.particles = this.particles.filter(p => !p.isDead);
 
-    // Respawn enemies to keep map populated
-    if (this.entities.length < 50) {
+    // 根据世界膨胀次数提高最大同屏容纳量
+    const targetEnemies = 50 + this.expansionCount * 5;
+    if (this.entities.length < targetEnemies) {
       this.spawnEnemy();
     }
-    if (this.particles.length < 50) {
+    const targetFood = 100 + this.expansionCount * 10;
+    if (this.particles.length < targetFood) {
       this.spawnFood();
     }
 
-    // Camera follow
-    this.camera.x += (this.player.x + this.player.size / 2 - this.width / 2 - this.camera.x) * 0.1;
-    this.camera.y += (this.player.y + this.player.size / 2 - this.height / 2 - this.camera.y) * 0.1;
+    // 平滑镜头追随
+    const targetX = this.player.x + this.player.size / 2;
+    const targetY = this.player.y + this.player.size / 2;
+    this.camera.x += (targetX - this.camera.x) * 0.1;
+    this.camera.y += (targetY - this.camera.y) * 0.1;
+    
+    // 动态缩放视野，保证玩家在屏幕上看起来大小总是45左右像素，彻底解决后期拥挤感
+    const targetScale = Math.max(0.01, 45 / this.player.size);
+    this.camera.scale += (targetScale - this.camera.scale) * 0.05;
 
-    // Check Game Over
     if (this.player.isDead) {
       this.onGameOver(Math.floor(this.player.area));
     }
   }
 
   updateAI(enemy: Entity) {
+    const speedMult = Math.pow(1.5, this.expansionCount);
+    
+    // 平衡：防止AI无限滚雪球霸屏
+    const maxMultiplier = 1.6 + (this.expansionCount * 0.15); // 后期允许出现比玩家大得多的庞然大物
+    const maxSize = Math.max(60, this.player.targetSize * maxMultiplier);
+    
+    // 如果巨大化超过当前限制，则慢慢自我衰减缩水，防止一个无敌方块吞噬全局
+    if (enemy.targetSize > maxSize) {
+       enemy.targetSize -= 0.1; 
+    }
+
     enemy.update();
 
     if (enemy.aiTimer > 0) {
         enemy.aiTimer--;
     } else {
-        enemy.aiTimer = 30 + Math.random() * 60; // Change direction every 0.5s to 1.5s
+        enemy.aiTimer = 30 + Math.random() * 60;
         
-        // Default: Random move
-        const speed = Math.min(5, Math.max(1.5, 300 / enemy.size));
+        const speed = Math.min(5 * speedMult, Math.max(1.5 * speedMult, 300 * speedMult / enemy.size));
         const angle = Math.random() * Math.PI * 2;
         enemy.targetVx = Math.cos(angle) * speed;
         enemy.targetVy = Math.sin(angle) * speed;
 
-        // 30% chance to chase or flee
         if (Math.random() < 0.3) {
             let closest: Entity | null = null;
-            let minDist = 500; // Awareness range
+            let minDist = 500 * speedMult; 
 
-            // Simple: only interact with player for AI decisions to keep performance up
             const distToPlayer = Math.hypot(this.player.x - enemy.x, this.player.y - enemy.y);
             if (distToPlayer < minDist) {
                 closest = this.player;
@@ -319,11 +381,9 @@ export class GameCore {
 
                 if (len > 0) {
                     if (ratio < 1 / this.absorbThreshold) {
-                        // Chase smaller
                         enemy.targetVx = (dx / len) * speed * 1.2;
                         enemy.targetVy = (dy / len) * speed * 1.2;
                     } else if (ratio > this.absorbThreshold) {
-                        // Flee larger
                         enemy.targetVx = -(dx / len) * speed * 1.2;
                         enemy.targetVy = -(dy / len) * speed * 1.2;
                     }
@@ -332,11 +392,9 @@ export class GameCore {
         }
     }
 
-    // Apply target velocity smoothly
     enemy.vx += (enemy.targetVx - enemy.vx) * 0.1;
     enemy.vy += (enemy.targetVy - enemy.vy) * 0.1;
 
-    // Keep in bounds
     if (enemy.x < 0) { enemy.x = 0; enemy.vx *= -1; enemy.targetVx *= -1; }
     if (enemy.x > this.worldSize - enemy.size) { enemy.x = this.worldSize - enemy.size; enemy.vx *= -1; enemy.targetVx *= -1; }
     if (enemy.y < 0) { enemy.y = 0; enemy.vy *= -1; enemy.targetVy *= -1; }
@@ -353,7 +411,6 @@ export class GameCore {
   checkBlockCollision(a: Entity, b: Entity) {
     if (!this.isOverlapping(a, b)) return;
 
-    // Centers
     const cxA = a.x + a.size / 2;
     const cyA = a.y + a.size / 2;
     const cxB = b.x + b.size / 2;
@@ -371,35 +428,31 @@ export class GameCore {
       const ratio = big.size / small.size;
 
       if (ratio >= this.absorbThreshold) {
-        // Instant Absorb
         big.addArea(small.area);
         small.isDead = true;
         if (big === this.player) this.onScoreUpdate(Math.floor(this.player.area));
       } else {
-        // Bump!
-        // Resolve position to prevent sticking and push away vigorously
+        const speedMult = Math.pow(1.5, this.expansionCount);
         if (overlapX < overlapY) {
           const dir = Math.sign(dx) || 1;
           a.x -= (overlapX / 2) * dir;
           b.x += (overlapX / 2) * dir;
-          a.vx -= dir * 8;
-          b.vx += dir * 8;
+          a.vx -= dir * 8 * speedMult;
+          b.vx += dir * 8 * speedMult;
         } else {
           const dir = Math.sign(dy) || 1;
           a.y -= (overlapY / 2) * dir;
           b.y += (overlapY / 2) * dir;
-          a.vy -= dir * 8;
-          b.vy += dir * 8;
+          a.vy -= dir * 8 * speedMult;
+          b.vy += dir * 8 * speedMult;
         }
 
-        // Drop particles on bump unconditionally
         const massLoss = small.area * this.bumpPenalty;
         if (small.targetSize > 15) {
           small.removeArea(massLoss);
           this.spawnDropParticles(small, big, massLoss);
           if (small === this.player) this.onScoreUpdate(Math.floor(this.player.area));
         } else {
-           // Too small after bump, dies
            big.addArea(small.area);
            small.isDead = true;
            if (big === this.player) this.onScoreUpdate(Math.floor(this.player.area));
@@ -409,14 +462,13 @@ export class GameCore {
   }
 
   spawnDropParticles(source: Entity, hitter: Entity, area: number) {
-    const particleArea = 12 * 12; // area of size 12 particle
-    // Always spawn at least 1 particle on bump so it's visually clear
+    const particleArea = 12 * 12;
     const count = Math.max(1, Math.min(10, Math.floor(area / particleArea)));
+    const speedMult = Math.pow(1.5, this.expansionCount);
     
     for (let i = 0; i < count; i++) {
-      // Scatter away from the hitter aggressively
       const angle = Math.atan2(source.y - hitter.y, source.x - hitter.x) + (Math.random() - 0.5) * 1.5;
-      const speed = 8 + Math.random() * 6;
+      const speed = (8 + Math.random() * 6) * speedMult;
       
       const p = new Entity(
         source.x + source.size / 2 - 6, 
@@ -432,55 +484,67 @@ export class GameCore {
   }
 
   draw() {
-    // Clear background
     this.ctx.fillStyle = '#0f172a';
     this.ctx.fillRect(0, 0, this.width, this.height);
 
     this.ctx.save();
+    
+    // 基于屏幕中心进行缩放渲染
+    this.ctx.translate(this.width / 2, this.height / 2);
+    this.ctx.scale(this.camera.scale, this.camera.scale);
     this.ctx.translate(-this.camera.x, -this.camera.y);
 
-    // Draw Grid (Floor)
+    // 绘制网格，为了防止无限拉远导致网格密集卡顿，动态调整网格基准尺寸
     this.ctx.strokeStyle = '#1e293b';
-    this.ctx.lineWidth = 2;
-    const gridSize = 100;
-    const startX = Math.floor(this.camera.x / gridSize) * gridSize;
-    const startY = Math.floor(this.camera.y / gridSize) * gridSize;
+    this.ctx.lineWidth = Math.max(2, 2 / this.camera.scale);
+    
+    let baseGrid = 100;
+    // 使得屏幕上显示的格子间距至少保持在 50 像素左右
+    while (baseGrid * this.camera.scale < 50) {
+        baseGrid *= 2; 
+    }
+    const gridSize = baseGrid;
+    
+    const visibleLeft = this.camera.x - (this.width / 2) / this.camera.scale;
+    const visibleRight = this.camera.x + (this.width / 2) / this.camera.scale;
+    const visibleTop = this.camera.y - (this.height / 2) / this.camera.scale;
+    const visibleBottom = this.camera.y + (this.height / 2) / this.camera.scale;
+
+    const startX = Math.floor(visibleLeft / gridSize) * gridSize;
+    const startY = Math.floor(visibleTop / gridSize) * gridSize;
     
     this.ctx.beginPath();
-    for (let x = startX; x < startX + this.width + gridSize; x += gridSize) {
-      this.ctx.moveTo(x, this.camera.y);
-      this.ctx.lineTo(x, this.camera.y + this.height);
+    for (let x = startX; x <= visibleRight + gridSize; x += gridSize) {
+      this.ctx.moveTo(x, visibleTop);
+      this.ctx.lineTo(x, visibleBottom);
     }
-    for (let y = startY; y < startY + this.height + gridSize; y += gridSize) {
-      this.ctx.moveTo(this.camera.x, y);
-      this.ctx.lineTo(this.camera.x + this.width, y);
+    for (let y = startY; y <= visibleBottom + gridSize; y += gridSize) {
+      this.ctx.moveTo(visibleLeft, y);
+      this.ctx.lineTo(visibleRight, y);
     }
     this.ctx.stroke();
 
-    // World bounds
+    // 绘制边界墙壁
     this.ctx.strokeStyle = '#ef4444';
-    this.ctx.lineWidth = 10;
+    this.ctx.lineWidth = Math.max(10, 5 / this.camera.scale);
     this.ctx.strokeRect(0, 0, this.worldSize, this.worldSize);
 
-    // Sort entities by Y coordinate
     const allObjects = [...this.particles, ...this.entities, this.player];
     allObjects.sort((a, b) => (a.y + a.size) - (b.y + b.size));
 
-    // Draw Flat 2D Blocks
     for (const obj of allObjects) {
       if (obj.isDead) continue;
       
       let color = obj.color;
       
-      // Dynamic coloring for AI relative to player size
       if (obj.type === 'enemy') {
         const ratio = obj.size / this.player.size;
         if (ratio < 1 / this.absorbThreshold) {
-          color = '#22c55e'; // Green - can be easily eaten
+          color = '#22c55e'; // 绿色 可食用
         } else if (ratio > this.absorbThreshold) {
-          color = '#ef4444'; // Red - danger, will eat you
+          color = '#ef4444'; // 红色 危险
         } else {
-          color = '#eab308'; // Yellow - similar size, bump
+          color = '#eab308'; // 黄色 同量级碰撞
         }
       }
 
@@ -489,11 +553,9 @@ export class GameCore {
 
     this.ctx.restore();
 
-    // Draw Joystick Overlay
     if (this.joystick.active) {
       this.ctx.save();
       
-      // Base
       this.ctx.beginPath();
       this.ctx.arc(this.joystick.baseX, this.joystick.baseY, this.joystick.radius, 0, Math.PI * 2);
       this.ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
@@ -502,7 +564,6 @@ export class GameCore {
       this.ctx.fill();
       this.ctx.stroke();
 
-      // Knob
       this.ctx.beginPath();
       this.ctx.arc(this.joystick.knobX, this.joystick.knobY, this.joystick.radius * 0.5, 0, Math.PI * 2);
       this.ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';

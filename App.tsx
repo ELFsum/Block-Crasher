@@ -13,6 +13,10 @@ function App() {
     setTime("00:00");
   };
 
+  const goToMenu = () => {
+    setGameState(GameState.MENU);
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 select-none touch-none">
       
@@ -86,12 +90,21 @@ function App() {
               </div>
             </div>
 
-            <button 
-              onClick={startGame}
-              className="w-full py-4 bg-white text-slate-900 font-bold rounded-xl text-lg shadow-[0_6px_0_#cbd5e1] hover:bg-slate-100 active:shadow-[0_0px_0_#cbd5e1] active:translate-y-[6px] transition-all"
-            >
-              TRY AGAIN
-            </button>
+            <div className="flex flex-col gap-4">
+              <button 
+                onClick={startGame}
+                className="w-full py-4 bg-white text-slate-900 font-bold rounded-xl text-lg shadow-[0_6px_0_#cbd5e1] hover:bg-slate-100 active:shadow-[0_0px_0_#cbd5e1] active:translate-y-[6px] transition-all"
+              >
+                TRY AGAIN
+              </button>
+              
+              <button 
+                onClick={goToMenu}
+                className="w-full py-4 bg-slate-700 text-white font-bold rounded-xl text-lg shadow-[0_6px_0_#334155] hover:bg-slate-600 active:shadow-[0_0px_0_#334155] active:translate-y-[6px] transition-all"
+              >
+                MAIN MENU
+              </button>
+            </div>
           </div>
         </div>
       )}
