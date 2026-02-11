@@ -37,8 +37,8 @@ export class GameCore {
     radius: 50
   };
   
-  absorbThreshold = 1.35; // Size ratio needed to instantly absorb
-  bumpPenalty = 0.15; // Percentage of area lost when bumped
+  absorbThreshold = 1.6; // Increased from 1.35 to 1.6: Size ratio needed to instantly absorb
+  bumpPenalty = 0.05; // 每次撞击小方块损失 5% 的体积，大方块损失较少比例
 
   startTime: number = 0;
   lastTimeStr: string = "";
@@ -428,31 +428,64 @@ export class GameCore {
       const ratio = big.size / small.size;
 
       if (ratio >= this.absorbThreshold) {
+        // 直接吞噬
         big.addArea(small.area);
         small.isDead = true;
         if (big === this.player) this.onScoreUpdate(Math.floor(this.player.area));
       } else {
         const speedMult = Math.pow(1.5, this.expansionCount);
+        
+        // 分配反弹比例，大方块重如泰山被弹开得少，小方块被猛烈弹开
+        const totalArea = big.area + small.area;
+        const bigRatio = small.area / totalArea; // 大方块受到的反作用力比例（较小）
+        const smallRatio = big.area / totalArea; // 小方块受到的反作用力比例（较大）
+        const baseBounceSpeed = 24 * speedMult;
+
+        // 推开逻辑
         if (overlapX < overlapY) {
           const dir = Math.sign(dx) || 1;
-          a.x -= (overlapX / 2) * dir;
-          b.x += (overlapX / 2) * dir;
-          a.vx -= dir * 8 * speedMult;
-          b.vx += dir * 8 * speedMult;
+          const moveA = a === big ? overlapX * bigRatio : overlapX * smallRatio;
+          const moveB = b === big ? overlapX * bigRatio : overlapX * smallRatio;
+          a.x -= moveA * dir;
+          b.x += moveB * dir;
+          
+          const speedA = a === big ? baseBounceSpeed * bigRatio : baseBounceSpeed * smallRatio;
+          const speedB = b === big ? baseBounceSpeed * bigRatio : baseBounceSpeed * smallRatio;
+          a.vx -= dir * speedA;
+          b.vx += dir * speedB;
         } else {
           const dir = Math.sign(dy) || 1;
-          a.y -= (overlapY / 2) * dir;
-          b.y += (overlapY / 2) * dir;
-          a.vy -= dir * 8 * speedMult;
-          b.vy += dir * 8 * speedMult;
+          const moveA = a === big ? overlapY * bigRatio : overlapY * smallRatio;
+          const moveB = b === big ? overlapY * bigRatio : overlapY * smallRatio;
+          a.y -= moveA * dir;
+          b.y += moveB * dir;
+          
+          const speedA = a === big ? baseBounceSpeed * bigRatio : baseBounceSpeed * smallRatio;
+          const speedB = b === big ? baseBounceSpeed * bigRatio : baseBounceSpeed * smallRatio;
+          a.vy -= dir * speedA;
+          b.vy += dir * speedB;
         }
 
-        const massLoss = small.area * this.bumpPenalty;
-        if (small.targetSize > 15) {
-          small.removeArea(massLoss);
-          this.spawnDropParticles(small, big, massLoss);
+        const massLossSmall = small.area * this.bumpPenalty;
+        // 大方块也会受损掉落，但比例只是小方块受损比例的 40% (即 2%)
+        const massLossBig = big.area * (this.bumpPenalty * 0.4); 
+
+        // 保证减去质量后，小方块面积>225才会继续存活并互掉碎片，否则直接被吞噬
+        if (small.area - massLossSmall > 225) {
+          
+          small.removeArea(massLossSmall);
+          this.spawnDropParticles(small, big, massLossSmall);
           if (small === this.player) this.onScoreUpdate(Math.floor(this.player.area));
+
+          // 大方块掉落判断
+          if (big.area - massLossBig > 225) {
+            big.removeArea(massLossBig);
+            this.spawnDropParticles(big, small, massLossBig);
+            if (big === this.player) this.onScoreUpdate(Math.floor(this.player.area));
+          }
+          
         } else {
+           // 撞击导致过小，直接被大方块吸收
            big.addArea(small.area);
            small.isDead = true;
            if (big === this.player) this.onScoreUpdate(Math.floor(this.player.area));
@@ -462,8 +495,10 @@ export class GameCore {
   }
 
   spawnDropParticles(source: Entity, hitter: Entity, area: number) {
-    const particleArea = 12 * 12;
-    const count = Math.max(1, Math.min(10, Math.floor(area / particleArea)));
+    // 根据丢失的面积精确切分成 1 到 4 个碎片，以确保地图上的总质量严格守恒
+    const count = Math.max(1, Math.min(4, Math.floor(area / 64))); // 以最小面积64(即size=8)为基准估算碎片数
+    const areaPerParticle = area / count;
+    const particleSize = Math.max(4, Math.sqrt(areaPerParticle)); // 确保最小尺寸可视
     const speedMult = Math.pow(1.5, this.expansionCount);
     
     for (let i = 0; i < count; i++) {
@@ -471,9 +506,9 @@ export class GameCore {
       const speed = (8 + Math.random() * 6) * speedMult;
       
       const p = new Entity(
-        source.x + source.size / 2 - 6, 
-        source.y + source.size / 2 - 6, 
-        12, 
+        source.x + source.size / 2 - particleSize / 2, 
+        source.y + source.size / 2 - particleSize / 2, 
+        particleSize, 
         'particle', 
         '#86efac'
       );

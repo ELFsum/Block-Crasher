@@ -58,7 +58,7 @@ function App() {
             <div className="bg-slate-900/50 rounded-xl p-5 mb-8 text-left space-y-3 border border-slate-700/50">
               <p className="text-sm text-slate-300 flex items-center"><span className="w-4 h-4 rounded bg-blue-500 mr-3 inline-block shadow-sm min-w-[16px]"></span> You control the Blue block (WASD, Arrows, or Touch).</p>
               <p className="text-sm text-slate-300 flex items-center"><span className="w-4 h-4 rounded bg-green-500 mr-3 inline-block shadow-sm min-w-[16px]"></span> <span><strong className="text-white mr-1">Green:</strong> Smaller than you. Eat them to grow!</span></p>
-              <p className="text-sm text-slate-300 flex items-center"><span className="w-4 h-4 rounded bg-yellow-500 mr-3 inline-block shadow-sm min-w-[16px]"></span> <span><strong className="text-white mr-1">Yellow:</strong> Similar size. The smaller block drops pieces when colliding.</span></p>
+              <p className="text-sm text-slate-300 flex items-center"><span className="w-4 h-4 rounded bg-yellow-500 mr-3 inline-block shadow-sm min-w-[16px]"></span> <span><strong className="text-white mr-1">Yellow:</strong> Similar size. Both drop pieces when colliding, but the smaller drops more and bounces further.</span></p>
               <p className="text-sm text-slate-300 flex items-center"><span className="w-4 h-4 rounded bg-red-500 mr-3 inline-block shadow-sm min-w-[16px]"></span> <span><strong className="text-white mr-1">Red:</strong> Danger! They will instantly absorb you.</span></p>
             </div>
 
