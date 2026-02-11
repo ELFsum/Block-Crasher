@@ -1,0 +1,5 @@
+{
+  "name": "Block Devourer",
+  "description": "A top-down 2D block collision game where you control a block, eat smaller blocks to grow, bump into similarly sized blocks to knock them apart, and avoid giant red blocks that will devour you.",
+  "requestFramePermissions": []
+}
