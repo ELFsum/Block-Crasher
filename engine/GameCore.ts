@@ -323,7 +323,7 @@ export class GameCore {
        this.expandWorld();
     }
 
-    const speedMult = Math.pow(1.5, this.expansionCount);
+    const speedMult = Math.pow(1.25, this.expansionCount);
     const sizeScale = Math.pow(this.player.size / 40, 0.5); 
     const clampedMax = 7 * sizeScale * speedMult;
     const accel = 0.9 * sizeScale * speedMult;
@@ -390,7 +390,7 @@ export class GameCore {
   }
 
   updateAI(enemy: Entity) {
-    const speedMult = Math.pow(1.5, this.expansionCount);
+    const speedMult = Math.pow(1.25, this.expansionCount);
     const sizeScale = Math.pow(enemy.size / 40, 0.5);
     const maxMultiplier = 1.6 + (this.expansionCount * 0.15); 
     const maxSize = Math.max(60, this.player.targetSize * maxMultiplier);
@@ -454,7 +454,7 @@ export class GameCore {
         small.isDead = true;
         if (big === this.player) this.onScoreUpdate(Math.floor(this.player.area));
       } else {
-        const speedMult = Math.pow(1.5, this.expansionCount);
+        const speedMult = Math.pow(1.25, this.expansionCount);
         const avgSize = (a.size + b.size) / 2;
         const avgSizeScale = Math.pow(avgSize / 40, 0.5); 
         const totalArea = big.area + small.area;
@@ -511,7 +511,7 @@ export class GameCore {
     const count = Math.max(2, Math.min(6, Math.floor(area / 40))); 
     const areaPerParticle = area / count;
     const particleSize = Math.max(4, Math.sqrt(areaPerParticle)); 
-    const speedMult = Math.pow(1.5, this.expansionCount);
+    const speedMult = Math.pow(1.25, this.expansionCount);
     const sizeScale = Math.pow(source.size / 40, 0.5);
     
     for (let i = 0; i < count; i++) {
